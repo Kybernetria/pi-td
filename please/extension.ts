@@ -294,7 +294,7 @@ async function selectTodoFlow(
           sessionId,
           initialSearch: search,
           onSelect: (todo) => done({ action: "select", todoId: todo.id }),
-          onCreate: () => done({ action: "create" }),
+          onCreate: (title) => done({ action: "create", title }),
           onBack: () => done(undefined),
         }),
     );
@@ -302,6 +302,22 @@ async function selectTodoFlow(
     if (!result || result.action === "back") return "continue";
 
     if (result.action === "create") {
+      // Quick-create: if a title was provided from the search bar, create directly
+      if (result.title) {
+        try {
+          const created = await invokeTodo<TodoRecord>(fabric, ctx, "create", {
+            title: result.title,
+            tags: [],
+            status: "open",
+          });
+          ctx.ui.notify(`Created ${created.id}`, "info");
+          postResult(pi, `Created ${formatTodoLine(created)}\n\n${formatTodoDetail(created)}`);
+        } catch (err) {
+          ctx.ui.notify(`Error: ${err instanceof Error ? err.message : String(err)}`, "error");
+        }
+        search = "";
+        continue;
+      }
       const createResult = await createTodoFlow(pi, fabric, ctx);
       if (createResult === "exit") return createResult;
       search = "";

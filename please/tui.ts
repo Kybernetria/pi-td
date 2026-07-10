@@ -104,7 +104,7 @@ export interface TodoRecord extends TodoSummary {
 
 export type SelectorResult =
 	| { action: "select"; todoId: string }
-	| { action: "create" }
+	| { action: "create"; title?: string }
 	| { action: "back" };
 
 export type OverlayResult = "back" | "work";
@@ -118,7 +118,7 @@ interface SelectorOptions {
 	sessionId?: string;
 	initialSearch?: string;
 	onSelect: (todo: TodoSummary) => void;
-	onCreate: () => void;
+	onCreate: (title?: string) => void;
 	onBack: () => void;
 }
 
@@ -241,7 +241,7 @@ export function createTodoSelector(
 		lines.push(
 			theme.fg(
 				"dim",
-				"Type to search • ↑↓ select • Enter actions • Esc back • + Create new",
+				"Type to search • ↑↓ select • Enter pick/create • Esc back",
 			),
 		);
 
@@ -268,6 +268,11 @@ export function createTodoSelector(
 			return;
 		}
 		if (keybindings.matches(keyData, "tui.select.confirm")) {
+			// If nothing matches the search, treat the query as a quick-create title
+			if (filteredTodos.length === 0 && searchValue.trim()) {
+				onCreate(searchValue.trim());
+				return;
+			}
 			const selected = filteredTodos[selectedIndex];
 			if (selected) {
 				onSelect(selected);
