@@ -267,7 +267,8 @@ export function createTodoSelector(
 			}
 			return;
 		}
-		if (keybindings.matches(keyData, "tui.select.confirm")) {
+		const isConfirm = keybindings.matches(keyData, "tui.select.confirm") || keyData === "\r" || keyData === "\n";
+		if (isConfirm) {
 			// If nothing matches the search, treat the query as a quick-create title
 			if (filteredTodos.length === 0 && searchValue.trim()) {
 				onCreate(searchValue.trim());

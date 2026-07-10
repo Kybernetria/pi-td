@@ -430,7 +430,7 @@ async function todoActionFlow(
         const filePath = getTodoPath(getTodosDir(ctx.cwd), normalizeTodoId(todo.id));
         const absolutePath = path.resolve(filePath);
         try {
-          copyToClipboard(absolutePath);
+          await copyToClipboard(absolutePath);
           ctx.ui.notify(`Copied ${absolutePath} to clipboard`, "info");
         } catch (err) {
           ctx.ui.notify(`Failed to copy: ${err instanceof Error ? err.message : String(err)}`, "error");
@@ -443,7 +443,7 @@ async function todoActionFlow(
         const body = todo.body?.trim() || "";
         const text = body ? `# ${title}\n\n${body}` : `# ${title}`;
         try {
-          copyToClipboard(text);
+          await copyToClipboard(text);
           ctx.ui.notify("Copied todo text to clipboard", "info");
         } catch (err) {
           ctx.ui.notify(`Failed to copy: ${err instanceof Error ? err.message : String(err)}`, "error");
