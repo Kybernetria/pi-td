@@ -1,0 +1,37 @@
+{
+  "name": "pi-please",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "File-based todo management via pi-protocol: create, list, update, close, and delete todo items stored as markdown files.",
+  "keywords": [
+    "pi-package",
+    "pi-protocol",
+    "todos",
+    "task-management"
+  ],
+  "exports": "./extension.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./extension.ts"
+    ]
+  },
+  "dependencies": {
+    "@kybernetria/pi-protocol": "file:../../pi-protocol/packages/pi-protocol"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.4",
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.3"
+  }
+}
