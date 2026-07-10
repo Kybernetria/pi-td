@@ -16,7 +16,10 @@ import {
 } from "@kybernetria/pi-protocol";
 import { readFileSync } from "node:fs";
 import { createHandlers } from "./protocol/handlers.ts";
-import { startupGC } from "./protocol/storage.ts";
+import { startupGC, getTodosDir, getTodoPath, normalizeTodoId } from "./protocol/storage.ts";
+import { copyToClipboard } from "@earendil-works/pi-coding-agent";
+import { createTodoSelector, createTodoDetailOverlay, type SelectorResult, type OverlayResult } from "./tui.ts";
+import path from "node:path";
 
 // Load manifest once at import time
 const manifest: PiProtocolManifest = JSON.parse(
@@ -66,6 +69,8 @@ type TodoAction =
   | "claim"
   | "release"
   | "delete"
+  | "copyPath"
+  | "copyText"
   | "back";
 
 export default function pleaseExtension(pi: ExtensionAPI): void {
@@ -278,48 +283,34 @@ async function selectTodoFlow(
   let search = initialSearch.trim();
 
   while (true) {
-    const list = await invokeTodo<TodoListOutput>(fabric, ctx, "list", { include_closed: includeClosed });
-    let todos = flattenTodos(list);
-    if (search) todos = filterTodos(todos, search);
+    const list = await safeInvokeList(fabric, ctx, includeClosed);
+    const todos = flattenTodos(list);
+    const sessionId = ctx.sessionManager?.getSessionId?.() ?? undefined;
 
-    const choices = ["← Back", "🔎 Search/refine", "➕ Create a new todo"];
-    const todoChoices = new Map<string, TodoSummary>();
-    for (const todo of todos) {
-      const label = formatTodoChoice(todo);
-      choices.push(label);
-      todoChoices.set(label, todo);
-    }
+    const result = await ctx.ui.custom<SelectorResult | undefined>(
+      (tui, theme, keybindings, done) =>
+        createTodoSelector(tui, theme, keybindings, {
+          todos,
+          sessionId,
+          initialSearch: search,
+          onSelect: (todo) => done({ action: "select", todoId: todo.id }),
+          onCreate: () => done({ action: "create" }),
+          onBack: () => done(undefined),
+        }),
+    );
 
-    if (todos.length === 0) {
-      choices.push(search ? `No matches for “${search}”` : "No todos yet");
-    }
+    if (!result || result.action === "back") return "continue";
 
-    const title = search
-      ? `Select a todo (${todos.length} matches for “${search}”)`
-      : includeClosed
-        ? `Select a todo (${todos.length} total)`
-        : `Select a todo (${todos.length} open/assigned)`;
-    const choice = await ctx.ui.select(title, choices);
-
-    if (!choice || choice === "← Back") return "continue";
-    if (choice.startsWith("No ")) continue;
-
-    if (choice.startsWith("🔎")) {
-      const nextSearch = await ctx.ui.input("Search todos by title, id, tag, status, or assignee:", search);
-      if (nextSearch !== undefined) search = nextSearch.trim();
+    if (result.action === "create") {
+      const createResult = await createTodoFlow(pi, fabric, ctx);
+      if (createResult === "exit") return createResult;
+      search = "";
       continue;
     }
 
-    if (choice.startsWith("➕")) {
-      const result = await createTodoFlow(pi, fabric, ctx);
-      if (result === "exit") return result;
-      continue;
-    }
-
-    const todo = todoChoices.get(choice);
-    if (!todo?.id) continue;
-    const result = await todoActionFlow(pi, fabric, ctx, todo.id);
-    if (result === "exit") return result;
+    const actionResult = await todoActionFlow(pi, fabric, ctx, result.todoId);
+    if (actionResult === "exit") return actionResult;
+    continue;
   }
 }
 
@@ -335,7 +326,23 @@ async function todoActionFlow(
     if (!choice || action === "back") return "continue";
 
     if (action === "show") {
-      postResult(pi, formatTodoDetail(todo));
+      const overlayAction = await ctx.ui.custom<OverlayResult>(
+        (overlayTui, overlayTheme, overlayKeybindings, overlayDone) =>
+          createTodoDetailOverlay(overlayTui, overlayTheme, overlayKeybindings, {
+            todo,
+            onBack: () => overlayDone("back"),
+            onWork: () => overlayDone("work"),
+          }),
+        { overlay: true, overlayOptions: { width: "80%", maxHeight: "80%", anchor: "center" } },
+      );
+
+      if (overlayAction === "work") {
+        ctx.ui.setEditorText(
+          `work on todo ${todo.id} "${todo.title ?? "(untitled)"}". Use pi_please to claim it before editing, and close or release it when done if appropriate.`,
+        );
+        ctx.ui.notify(`Prepared prompt for ${todo.id}`, "info");
+        return "exit";
+      }
       continue;
     }
 
@@ -403,6 +410,31 @@ async function todoActionFlow(
         continue;
       }
 
+      if (action === "copyPath") {
+        const filePath = getTodoPath(getTodosDir(ctx.cwd), normalizeTodoId(todo.id));
+        const absolutePath = path.resolve(filePath);
+        try {
+          copyToClipboard(absolutePath);
+          ctx.ui.notify(`Copied ${absolutePath} to clipboard`, "info");
+        } catch (err) {
+          ctx.ui.notify(`Failed to copy: ${err instanceof Error ? err.message : String(err)}`, "error");
+        }
+        continue;
+      }
+
+      if (action === "copyText") {
+        const title = todo.title || "(untitled)";
+        const body = todo.body?.trim() || "";
+        const text = body ? `# ${title}\n\n${body}` : `# ${title}`;
+        try {
+          copyToClipboard(text);
+          ctx.ui.notify("Copied todo text to clipboard", "info");
+        } catch (err) {
+          ctx.ui.notify(`Failed to copy: ${err instanceof Error ? err.message : String(err)}`, "error");
+        }
+        continue;
+      }
+
       if (action === "delete") {
         const confirmed = await ctx.ui.confirm("Delete todo?", `${formatTodoLine(todo)}\n\nThis cannot be undone.`);
         if (!confirmed) continue;
@@ -437,6 +469,8 @@ async function chooseTodoAction(
     "🏷️ Edit tags",
     closed ? "↩️ Reopen" : "✅ Close",
     assigned ? "🙌 Release assignment" : "🙋 Claim assignment",
+    "📋 Copy path to clipboard",
+    "📄 Copy text to clipboard",
     "🗑️ Delete",
     "← Back",
   ];
@@ -467,9 +501,13 @@ async function chooseTodoAction(
                           ? "release"
                           : choice.startsWith("🙋")
                             ? "claim"
-                            : choice.startsWith("🗑️")
-                              ? "delete"
-                              : "back";
+                            : choice.startsWith("📋")
+                              ? "copyPath"
+                              : choice.startsWith("📄")
+                                ? "copyText"
+                                : choice.startsWith("🗑️")
+                                  ? "delete"
+                                  : "back";
   return { choice, action };
 }
 
