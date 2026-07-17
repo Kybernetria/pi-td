@@ -1,7 +1,7 @@
 /**
- * pi-please — File-based todo management via pi-protocol.
+ * pi-todo — File-based todo management via pi-protocol.
  *
- * Registers the pi_please node on the protocol fabric with handler-backed provides
+ * Registers the pi_todo node on the protocol fabric with handler-backed provides
  * for all todo operations (list, get, create, update, append, close, reopen, delete,
  * claim, release), and exposes a streamlined /todos slash command that uses the
  * protocol provides. No tool is registered — all operations go through the fabric.
@@ -26,7 +26,7 @@ const manifest: PiProtocolManifest = JSON.parse(
   readFileSync(new URL("./pi.protocol.json", import.meta.url), "utf8"),
 );
 
-const NODE_ID = "pi_please";
+const NODE_ID = "pi_todo";
 const COMMAND_CALLER_ID = "pi.todos.command";
 
 interface ParsedCommand {
@@ -41,6 +41,7 @@ interface TodoSummary {
   status?: string;
   created_at?: string;
   assigned_to_session?: string;
+  parent_id?: string;
 }
 
 interface TodoRecord extends TodoSummary {
@@ -73,30 +74,33 @@ type TodoAction =
   | "copyText"
   | "back";
 
-export default function pleaseExtension(pi: ExtensionAPI): void {
+export default function todoExtension(pi: ExtensionAPI): void {
   const fabric = ensureProtocolFabric();
+  let activeCwd = process.cwd();
 
   // Safe re-registration
   fabric.unregister(NODE_ID);
   registerProtocolManifest(fabric, {
     manifest,
-    handlers: createHandlers(),
+    handlers: createHandlers(() => activeCwd),
   });
 
-  // Run startup GC when session starts
-  pi.on("session_start", async () => {
-    await startupGC();
+  // Keep protocol storage aligned with Pi's active project context.
+  pi.on("session_start", async (_event, ctx) => {
+    activeCwd = ctx.cwd;
+    await startupGC(activeCwd);
   });
 
   // Register slash command
-  registerSlashCommands(pi, fabric);
+  registerSlashCommands(pi, fabric, (cwd) => { activeCwd = cwd; });
 }
 
-function registerSlashCommands(pi: ExtensionAPI, fabric: ProtocolFabric): void {
+function registerSlashCommands(pi: ExtensionAPI, fabric: ProtocolFabric, setActiveCwd: (cwd: string) => void): void {
   pi.registerCommand("todos", {
     description:
-      "Open an interactive todo manager. Optional shortcuts: add <title>, done <id>, note <id> <text>, list.",
+      "Todo manager: /todos add <title>, done <id>, list, etc. Run /todos with no args for interactive mode.",
     handler: async (args: string, ctx: ExtensionContext) => {
+      setActiveCwd(ctx.cwd);
       const argsText = (args ?? "").trim();
 
       if (isHelpRequest(argsText)) {
@@ -105,8 +109,14 @@ function registerSlashCommands(pi: ExtensionAPI, fabric: ProtocolFabric): void {
       }
 
       if (!argsText) {
-        if (ctx.hasUI) {
-          await runInteractiveTodos(pi, fabric, ctx);
+        if (ctx.mode === "tui") {
+          try {
+            await runInteractiveTodos(pi, fabric, ctx);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            ctx.ui.notify(message, "error");
+            postResult(pi, `Error: ${message}`);
+          }
         } else {
           await runParsedCommand(pi, fabric, ctx, { provide: "list", input: {} });
         }
@@ -119,13 +129,7 @@ function registerSlashCommands(pi: ExtensionAPI, fabric: ProtocolFabric): void {
         return;
       }
 
-      // In the TUI, unknown args become a search query instead of an error. This
-      // makes `/todos auth bug` useful without requiring a sub-command.
-      if (ctx.hasUI) {
-        await runInteractiveTodos(pi, fabric, ctx, argsText);
-        return;
-      }
-
+      // Nothing matched — show help so the user knows what commands are available.
       postHelp(pi);
     },
   });
@@ -179,16 +183,12 @@ async function runInteractiveTodos(
   pi: ExtensionAPI,
   fabric: ProtocolFabric,
   ctx: ExtensionContext,
-  initialSearch = "",
 ): Promise<void> {
-  let pendingSearch = initialSearch.trim();
-
   while (true) {
     const list = await safeInvokeList(fabric, ctx, true);
     const counts = getTodoCounts(list);
     const choices = [
       "➕ Create a new todo",
-      pendingSearch ? `🔎 Continue search: ${pendingSearch}` : "🔎 Find a todo",
       "📋 Browse open and assigned todos",
       "🗄️ Browse everything, including closed",
       "📊 Show a quick summary",
@@ -206,18 +206,6 @@ async function runInteractiveTodos(
     try {
       if (choice.startsWith("➕")) {
         const result = await createTodoFlow(pi, fabric, ctx);
-        if (result === "exit") return;
-        continue;
-      }
-
-      if (choice.startsWith("🔎")) {
-        if (!pendingSearch) {
-          const search = await ctx.ui.input("Search todos by title, id, tag, status, or assignee:", "");
-          if (search === undefined) continue;
-          pendingSearch = search.trim();
-        }
-        const result = await selectTodoFlow(pi, fabric, ctx, pendingSearch, true);
-        pendingSearch = "";
         if (result === "exit") return;
         continue;
       }
@@ -354,7 +342,7 @@ async function todoActionFlow(
 
       if (overlayAction === "work") {
         ctx.ui.setEditorText(
-          `work on todo ${todo.id} "${todo.title ?? "(untitled)"}". Use pi_please to claim it before editing, and close or release it when done if appropriate.`,
+          `work on todo ${todo.id} "${todo.title ?? "(untitled)"}". Use pi_todo to claim it before editing, and close or release it when done if appropriate.`,
         );
         ctx.ui.notify(`Prepared prompt for ${todo.id}`, "info");
         return "exit";
@@ -364,7 +352,7 @@ async function todoActionFlow(
 
     if (action === "work") {
       ctx.ui.setEditorText(
-        `work on todo ${todo.id} "${todo.title ?? "(untitled)"}". Use pi_please to claim it before editing, and close or release it when done if appropriate.`,
+        `work on todo ${todo.id} "${todo.title ?? "(untitled)"}". Use pi_todo to claim it before editing, and close or release it when done if appropriate.`,
       );
       ctx.ui.notify(`Prepared prompt for ${todo.id}`, "info");
       return "exit";
@@ -372,7 +360,7 @@ async function todoActionFlow(
 
     if (action === "refine") {
       ctx.ui.setEditorText(
-        `let's refine todo ${todo.id} "${todo.title ?? "(untitled)"}": ask me for missing details first, then update the todo through pi_please once I confirm.`,
+        `let's refine todo ${todo.id} "${todo.title ?? "(untitled)"}": ask me for missing details first, then update the todo through pi_todo once I confirm.`,
       );
       ctx.ui.notify(`Prepared refinement prompt for ${todo.id}`, "info");
       return "exit";
@@ -542,11 +530,8 @@ async function updateAndReport(
 }
 
 async function safeInvokeList(fabric: ProtocolFabric, ctx: ExtensionContext, includeClosed: boolean): Promise<TodoListOutput> {
-  try {
-    return await invokeTodo<TodoListOutput>(fabric, ctx, "list", { include_closed: includeClosed });
-  } catch {
-    return { assigned: [], open: [], closed: [] };
-  }
+  // Do not turn protocol or storage failures into a misleading empty list.
+  return invokeTodo<TodoListOutput>(fabric, ctx, "list", { include_closed: includeClosed });
 }
 
 function parseTodosCommand(args: string): ParsedCommand | null {
@@ -568,8 +553,9 @@ function parseTodosCommand(args: string): ParsedCommand | null {
     const body = takeFlagValue(argv, "--body");
     const tags = parseTags(takeFlagValue(argv, "--tags"));
     const status = takeFlagValue(argv, "--status");
+    const parent_id = takeFlagValue(argv, "--parent");
     const title = argv.join(" ").trim();
-    return title ? { provide: "create", input: compactObject({ title, body, tags, status }) } : null;
+    return title ? { provide: "create", input: compactObject({ title, body, tags, status, parent_id }) } : null;
   }
 
   if (["update", "edit"].includes(command)) {
@@ -579,11 +565,13 @@ function parseTodosCommand(args: string): ParsedCommand | null {
     const body = takeFlagValue(argv, "--body");
     const tags = parseTags(takeFlagValue(argv, "--tags"));
     const status = takeFlagValue(argv, "--status");
+    const parent_id = takeFlagValue(argv, "--parent");
+    const topLevel = takeBooleanFlag(argv, "--top-level");
     const append = takeBooleanFlag(argv, "--append");
     const title = titleFlag ?? (argv.join(" ").trim() || undefined);
     return {
       provide: "update",
-      input: compactObject({ id, title, body, tags, status, body_mode: append ? "append" : undefined }),
+      input: compactObject({ id, title, body, tags, status, parent_id: topLevel ? null : parent_id, body_mode: append ? "append" : undefined }),
     };
   }
 
@@ -799,7 +787,7 @@ function isTodoRecord(value: unknown): value is TodoRecord {
 
 function postHelp(pi: ExtensionAPI): void {
   const help = [
-    "**📋 pi-please /todos**",
+    "**📋 pi-todo /todos**",
     "",
     "Run `/todos` with no arguments for a guided todo manager: create, search, edit, close, claim, release, or delete without remembering commands.",
     "",
@@ -810,11 +798,11 @@ function postHelp(pi: ExtensionAPI): void {
     "  `/todos list` or `/todos list all`",
     "  `/todos take TODO-deadbeef` / `/todos drop TODO-deadbeef`",
     "",
-    "Protocol access for agents is unchanged: use `pi_please.list`, `pi_please.get`, `pi_please.create`, `pi_please.update`, `pi_please.delete`, `pi_please.claim`, and `pi_please.release`.",
+    "Protocol access for agents is unchanged: use `pi_todo.list`, `pi_todo.get`, `pi_todo.create`, `pi_todo.update`, `pi_todo.delete`, `pi_todo.claim`, and `pi_todo.release`.",
   ].join("\n");
-  pi.sendMessage({ customType: "pi-please.help", content: help, display: true });
+  pi.sendMessage({ customType: "pi-todo.help", content: help, display: true });
 }
 
 function postResult(pi: ExtensionAPI, content: string): void {
-  pi.sendMessage({ customType: "pi-please.command_result", content, display: true });
+  pi.sendMessage({ customType: "pi-todo.command_result", content, display: true });
 }

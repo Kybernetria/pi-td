@@ -1,26 +1,26 @@
-# pi-please
+# pi-todo
 
 File-based todo management via pi-protocol: create, list, update, delete, claim, and release todo items stored as markdown files under `.pi/todos`. Close/reopen/append are handled through `update`.
 
 ## Protocol provides
 
-All operations are exposed through the `pi_please` protocol node:
+All operations are exposed through the `pi_todo` protocol node:
 
 | Provide | Description |
 |---|---|
-| `pi_please.list` | List open and assigned todos |
-| `pi_please.get` | Get a single todo by id |
-| `pi_please.create` | Create a new todo |
-| `pi_please.update` | Update an existing todo; use `status` for close/reopen and `body_mode: "append"` for append |
-| `pi_please.delete` | Delete a todo |
-| `pi_please.claim` | Claim session assignment |
-| `pi_please.release` | Release session assignment |
+| `pi_todo.list` | List open and assigned todos |
+| `pi_todo.get` | Get a single todo by id |
+| `pi_todo.create` | Create a new todo; pass `parent_id` to create a sub-todo |
+| `pi_todo.update` | Update an existing todo; use `parent_id` to move it (or `null` to make it top-level), `status` for close/reopen, and `body_mode: "append"` for append |
+| `pi_todo.delete` | Delete a todo |
+| `pi_todo.claim` | Claim session assignment |
+| `pi_todo.release` | Release session assignment |
 
 ### Invoke examples
 
 ```json
 {
-  "nodeId": "pi_please",
+  "nodeId": "pi_todo",
   "provide": "create",
   "input": { "title": "Add tests", "tags": ["qa"] }
 }
@@ -28,7 +28,7 @@ All operations are exposed through the `pi_please` protocol node:
 
 ```json
 {
-  "nodeId": "pi_please",
+  "nodeId": "pi_todo",
   "provide": "list",
   "input": { "include_closed": true }
 }
@@ -36,7 +36,7 @@ All operations are exposed through the `pi_please` protocol node:
 
 ```json
 {
-  "nodeId": "pi_please",
+  "nodeId": "pi_todo",
   "provide": "update",
   "input": { "id": "TODO-deadbeef", "status": "closed" }
 }
@@ -70,11 +70,22 @@ Each todo is stored as `<id>.md` under `.pi/todos/`:
   "title": "Example",
   "tags": ["dev"],
   "status": "open",
-  "created_at": "2026-01-25T17:00:00.000Z"
+  "created_at": "2026-01-25T17:00:00.000Z",
+  "parent_id": "deadbeef"
 }
 
 Notes about the todo go here.
 ```
+
+## Sub-todos
+
+Todos can be nested to any depth by storing a `parent_id`. Create one with
+`{ "title": "Implement API", "parent_id": "TODO-deadbeef" }`, or move an
+existing todo with `update`. In the slash command use `/todos add "Implement API"
+--parent TODO-deadbeef`, or `/todos update TODO-child --top-level` to detach it.
+`parent_id: null` removes the parent. Parent IDs
+must exist and cycles are rejected. A todo with sub-todos cannot be deleted
+until its children are reparented or deleted.
 
 ## Storage
 

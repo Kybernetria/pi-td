@@ -47,7 +47,6 @@ import {
 	type SelectItem,
 	Text,
 	TUI,
-	fuzzyMatch,
 	matchesKey,
 	truncateToWidth,
 	visibleWidth,
@@ -205,45 +204,15 @@ function buildTodoSearchText(todo: TodoFrontMatter): string {
 }
 
 function filterTodos(todos: TodoFrontMatter[], query: string): TodoFrontMatter[] {
-	const trimmed = query.trim();
-	if (!trimmed) return todos;
-
-	const tokens = trimmed
-		.split(/\s+/)
-		.map((token) => token.trim())
-		.filter(Boolean);
-
+	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 	if (tokens.length === 0) return todos;
 
-	const matches: Array<{ todo: TodoFrontMatter; score: number }> = [];
-	for (const todo of todos) {
-		const text = buildTodoSearchText(todo);
-		let totalScore = 0;
-		let matched = true;
-		for (const token of tokens) {
-			const result = fuzzyMatch(token, text);
-			if (!result.matches) {
-				matched = false;
-				break;
-			}
-			totalScore += result.score;
-		}
-		if (matched) {
-			matches.push({ todo, score: totalScore });
-		}
-	}
-
-	return matches
-		.sort((a, b) => {
-			const aClosed = isTodoClosed(a.todo.status);
-			const bClosed = isTodoClosed(b.todo.status);
-			if (aClosed !== bClosed) return aClosed ? 1 : -1;
-			const aAssigned = !aClosed && Boolean(a.todo.assigned_to_session);
-			const bAssigned = !bClosed && Boolean(b.todo.assigned_to_session);
-			if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
-			return a.score - b.score;
-		})
-		.map((match) => match.todo);
+	// A search should only narrow the list; fuzzy scoring made items reorder and
+	// disappear in surprising ways while typing.
+	return todos.filter((todo) => {
+		const text = buildTodoSearchText(todo).toLowerCase();
+		return tokens.every((token) => text.includes(token));
+	});
 }
 
 class TodoSelectorComponent extends Container implements Focusable {
@@ -291,12 +260,11 @@ class TodoSelectorComponent extends Container implements Focusable {
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
-		this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-		this.addChild(new Spacer(1));
-
-		this.headerText = new Text("", 1, 0);
+		// Keep the picker compact: it is often opened in a short terminal pane.
+		// The previous framed layout used most of the viewport before any todos
+		// could be shown.
+		this.headerText = new Text("", 0, 0);
 		this.addChild(this.headerText);
-		this.addChild(new Spacer(1));
 
 		this.searchInput = new Input();
 		if (initialSearchInput) {
@@ -307,16 +275,10 @@ class TodoSelectorComponent extends Container implements Focusable {
 			if (selected) this.onSelectCallback(selected);
 		};
 		this.addChild(this.searchInput);
-
-		this.addChild(new Spacer(1));
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
-
-		this.addChild(new Spacer(1));
-		this.hintText = new Text("", 1, 0);
+		this.hintText = new Text("", 0, 0);
 		this.addChild(this.hintText);
-		this.addChild(new Spacer(1));
-		this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
 		this.updateHeader();
 		this.updateHints();
@@ -364,7 +326,9 @@ class TodoSelectorComponent extends Container implements Focusable {
 			return;
 		}
 
-		const maxVisible = 10;
+		// Header, input, and hint consume three rows. Reserve no more space than
+		// is actually available so a todo remains visible in short panes.
+		const maxVisible = Math.max(1, Math.min(10, (this.tui.terminal.rows ?? 24) - 3));
 		const startIndex = Math.max(
 			0,
 			Math.min(this.selectedIndex - Math.floor(maxVisible / 2), this.filteredTodos.length - maxVisible),
@@ -433,6 +397,15 @@ class TodoSelectorComponent extends Container implements Focusable {
 		if (matchesKey(keyData, Key.ctrlShift("w"))) {
 			const selected = this.filteredTodos[this.selectedIndex];
 			if (selected && this.onQuickAction) this.onQuickAction(selected, "work");
+			return;
+		}
+		// Some terminals send a raw DEL (0x7f) for Backspace. Input deliberately
+		// rejects raw control characters, so normalize it here rather than leaving
+		// the search text impossible to edit.
+		if (keyData === "\x7f" || keyData === "\b" || keyData === "Backspace") {
+			this.searchInput.setValue(Array.from(this.searchInput.getValue()).slice(0, -1).join(""));
+			this.applyFilter(this.searchInput.getValue());
+			this.tui.requestRender();
 			return;
 		}
 		this.searchInput.handleInput(keyData);

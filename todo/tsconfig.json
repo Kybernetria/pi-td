@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["extension.ts", "protocol/**/*.ts"]
+  "include": ["extension.ts", "tui.ts", "protocol/**/*.ts", "tests/**/*.ts"]
 }

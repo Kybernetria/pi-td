@@ -1,7 +1,7 @@
 {
   "protocolVersion": "0.2.0",
-  "nodeId": "pi_please",
-  "packageId": "pi-please",
+  "nodeId": "pi_todo",
+  "packageId": "pi-todo",
   "version": "0.1.0",
   "purpose": "File-based todo management: create, list, get, update, delete, claim, and release todo items stored as markdown files under .pi/todos.",
   "provides": [
@@ -47,6 +47,7 @@
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
+          "parent_id": { "type": "string" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -55,7 +56,7 @@
     },
     {
       "name": "create",
-      "description": "Create a new todo with title, optional tags, status, and body. Returns the created todo.",
+      "description": "Create a new todo with title, optional tags, status, body, and optional parent_id for a sub-todo. Returns the created todo.",
       "inputSchema": {
         "type": "object",
         "required": ["title"],
@@ -63,7 +64,8 @@
           "title": { "type": "string", "description": "Short summary of the todo" },
           "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tags" },
           "status": { "type": "string", "description": "Optional status (default: open)" },
-          "body": { "type": "string", "description": "Long-form markdown details" }
+          "body": { "type": "string", "description": "Long-form markdown details" },
+          "parent_id": { "type": ["string", "null"], "description": "Optional parent todo id; creates a sub-todo" }
         }
       },
       "outputSchema": {
@@ -75,6 +77,7 @@
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
+          "parent_id": { "type": "string" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -93,7 +96,8 @@
           "status": { "type": "string", "description": "New status, e.g. open or closed" },
           "tags": { "type": "array", "items": { "type": "string" }, "description": "New tags" },
           "body": { "type": "string", "description": "Body text to replace or append" },
-          "body_mode": { "type": "string", "enum": ["replace", "append"], "description": "Body update mode. Defaults to replace." }
+          "body_mode": { "type": "string", "enum": ["replace", "append"], "description": "Body update mode. Defaults to replace." },
+          "parent_id": { "type": ["string", "null"], "description": "New parent todo id, or null to make this a top-level todo" }
         }
       },
       "outputSchema": {
@@ -105,6 +109,7 @@
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
+          "parent_id": { "type": "string" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }

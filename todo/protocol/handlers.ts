@@ -1,5 +1,5 @@
 /**
- * Protocol handlers for pi-please todo management.
+ * Protocol handlers for pi-todo todo management.
  *
  * Each handler maps to a provide in pi.protocol.json.
  * Handlers use the core storage functions from ./storage.ts.
@@ -20,13 +20,16 @@ import {
   serializeTodoForOutput,
 } from "./storage.ts";
 
+let handlerCwdProvider: () => string = () => process.cwd();
+const currentTodosDir = (): string => getTodosDir(handlerCwdProvider());
+
 function getSessionId(context?: ProtocolInvocationContext): string | undefined {
   return context?.session?.id || context?.callerNodeId || undefined;
 }
 
 export const list_handler: ProtocolHandler = async (input) => {
   const { include_closed } = input as { include_closed?: boolean };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const todos = await listTodos(todosDir);
   const visibleTodos = include_closed ? todos : todos.filter((todo) => !["closed", "done"].includes((todo.status || "open").toLowerCase()));
   return serializeTodoListForOutput(visibleTodos);
@@ -35,43 +38,45 @@ export const list_handler: ProtocolHandler = async (input) => {
 export const get_handler: ProtocolHandler = async (input, context) => {
   const { id } = input as { id: string };
   if (!id) return { error: "id is required" };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const result = await getTodo(todosDir, id);
   if ("error" in result) return result;
   return serializeTodoForOutput(result);
 };
 
 export const create_handler: ProtocolHandler = async (input, context) => {
-  const { title, tags, status, body } = input as {
+  const { title, tags, status, body, parent_id } = input as {
     title?: string;
     tags?: string[];
     status?: string;
     body?: string;
+    parent_id?: string | null;
   };
   if (!title) return { error: "title is required" };
-  const todosDir = getTodosDir();
-  const result = await createTodo(todosDir, { title, tags, status, body });
+  const todosDir = currentTodosDir();
+  const result = await createTodo(todosDir, { title, tags, status, body, parent_id });
   if ("error" in result) return result;
   return serializeTodoForOutput(result);
 };
 
 export const update_handler: ProtocolHandler = async (input, context) => {
-  const { id, title, status, tags, body, body_mode } = input as {
+  const { id, title, status, tags, body, body_mode, parent_id } = input as {
     id?: string;
     title?: string;
     status?: string;
     tags?: string[];
     body?: string;
     body_mode?: "replace" | "append";
+    parent_id?: string | null;
   };
   if (!id) return { error: "id is required" };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const sessionId = getSessionId(context);
 
   if (body_mode === "append") {
-    const hasFieldUpdates = title !== undefined || status !== undefined || tags !== undefined;
+    const hasFieldUpdates = title !== undefined || status !== undefined || tags !== undefined || parent_id !== undefined;
     if (hasFieldUpdates) {
-      const fieldResult = await updateTodo(todosDir, id, { title, status, tags }, sessionId);
+      const fieldResult = await updateTodo(todosDir, id, { title, status, tags, parent_id }, sessionId);
       if ("error" in fieldResult) return fieldResult;
       if (body === undefined || !body.trim()) return serializeTodoForOutput(fieldResult);
     }
@@ -81,7 +86,7 @@ export const update_handler: ProtocolHandler = async (input, context) => {
     return serializeTodoForOutput(appendResult);
   }
 
-  const result = await updateTodo(todosDir, id, { title, status, tags, body }, sessionId);
+  const result = await updateTodo(todosDir, id, { title, status, tags, body, parent_id }, sessionId);
   if ("error" in result) return result;
   return serializeTodoForOutput(result);
 };
@@ -89,7 +94,7 @@ export const update_handler: ProtocolHandler = async (input, context) => {
 export const delete_handler: ProtocolHandler = async (input, context) => {
   const { id } = input as { id: string };
   if (!id) return { error: "id is required" };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const sessionId = getSessionId(context);
   const result = await deleteTodoById(todosDir, id, sessionId);
   if ("error" in result) return result;
@@ -99,7 +104,7 @@ export const delete_handler: ProtocolHandler = async (input, context) => {
 export const claim_handler: ProtocolHandler = async (input, context) => {
   const { id, force } = input as { id?: string; force?: boolean };
   if (!id) return { error: "id is required" };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const sessionId = getSessionId(context);
   if (!sessionId) return { error: "No session identifier available to claim assignment" };
   const result = await claimTodo(todosDir, id, sessionId, Boolean(force));
@@ -110,7 +115,7 @@ export const claim_handler: ProtocolHandler = async (input, context) => {
 export const release_handler: ProtocolHandler = async (input, context) => {
   const { id, force } = input as { id?: string; force?: boolean };
   if (!id) return { error: "id is required" };
-  const todosDir = getTodosDir();
+  const todosDir = currentTodosDir();
   const sessionId = getSessionId(context);
   if (!sessionId) return { error: "No session identifier available to release assignment" };
   const result = await releaseTodo(todosDir, id, sessionId, Boolean(force));
@@ -118,8 +123,9 @@ export const release_handler: ProtocolHandler = async (input, context) => {
   return serializeTodoForOutput(result);
 };
 
-/** Map of handler names to handler functions for registerProtocolManifest */
-export function createHandlers(): Record<string, ProtocolHandler> {
+/** Map of handler names to handler functions for registerProtocolManifest. */
+export function createHandlers(cwdProvider: () => string = () => process.cwd()): Record<string, ProtocolHandler> {
+  handlerCwdProvider = cwdProvider;
   return {
     list: list_handler,
     get: get_handler,

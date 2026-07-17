@@ -1,5 +1,5 @@
 /**
- * Custom TUI components for the pi-please /todos interactive command.
+ * Custom TUI components for the pi-todo /todos interactive command.
  *
  * TodoSelectorComponent — fuzzy-searchable, scrollable todo picker.
  * TodoDetailOverlayComponent — framed markdown viewer with scrolling.
@@ -8,81 +8,27 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // These types come from the ctx.ui.custom() callback. We define minimal
 // structural interfaces instead of importing from pi-tui directly.
-interface MinimalTUI { terminal: { rows?: number; cols?: number } }
+interface MinimalTUI {
+	terminal: { rows?: number; cols?: number };
+	requestRender(): void;
+}
 interface MinimalKeybindings { matches(keyData: string, bindingId: string): boolean }
 
 // ---------------------------------------------------------------------------
 // Shared utilities
 // ---------------------------------------------------------------------------
 
-function visibleWidth(text: string): number {
-	let width = 0;
-	for (const char of text) {
-		const code = char.codePointAt(0) ?? 0;
-		// Very rough: treat CJK & emoji as double-width; everything else as 1.
-		if (
-			code > 0x1100 &&
-			(code <= 0x115f ||
-				code === 0x2329 ||
-				code === 0x232a ||
-				(code >= 0x2e80 && code <= 0xa4cf) ||
-				(code >= 0xac00 && code <= 0xd7a3) ||
-				(code >= 0xf900 && code <= 0xfaff) ||
-				(code >= 0xfe10 && code <= 0xfe19) ||
-				(code >= 0xfe30 && code <= 0xfe6f) ||
-				(code >= 0xff00 && code <= 0xff60) ||
-				(code >= 0xffe0 && code <= 0xffe6) ||
-				(code >= 0x1f300 && code <= 0x1f64f) ||
-				(code >= 0x1f680 && code <= 0x1f6ff) ||
-				(code >= 0x1f900 && code <= 0x1f9ff))
-		) {
-			width += 2;
-		} else {
-			width += 1;
-		}
-	}
-	return width;
-}
-
-function truncateToWidth(text: string, maxWidth: number): string {
-	let width = 0;
-	let result = "";
-	for (const char of text) {
-		const code = char.codePointAt(0) ?? 0;
-		const charWidth =
-			code > 0x7f && code <= 0xffff ? 2 : code > 0xffff ? 2 : 1;
-		if (width + charWidth > maxWidth) break;
-		result += char;
-		width += charWidth;
-	}
-	return result;
-}
-
-function padRight(text: string, width: number): string {
-	const textWidth = visibleWidth(text);
-	if (textWidth >= width) return text;
-	return text + " ".repeat(width - textWidth);
-}
-
-/** Simple token-based fuzzy match: all tokens must appear in order in text. */
-function fuzzyMatch(query: string, text: string): boolean {
-	const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-	if (!tokens.length) return true;
-	const lower = text.toLowerCase();
-	let pos = 0;
-	for (const token of tokens) {
-		const idx = lower.indexOf(token, pos);
-		if (idx === -1) return false;
-		pos = idx + token.length;
-	}
-	return true;
-}
 
 function isClosed(status?: string): boolean {
 	return ["closed", "done"].includes((status ?? "open").toLowerCase());
+}
+
+function todoKey(id?: string): string {
+	return (id ?? "").replace(/^TODO-/i, "").toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +42,7 @@ export interface TodoSummary {
 	status?: string;
 	created_at?: string;
 	assigned_to_session?: string;
+	parent_id?: string;
 }
 
 export interface TodoRecord extends TodoSummary {
@@ -136,34 +83,55 @@ export function createTodoSelector(
 
 	function filterAndSort(todos: TodoSummary[], query: string): TodoSummary[] {
 		if (!query.trim()) {
-			// Natural order: assigned/open first, then closed
-			return [...todos].sort((a, b) => {
-				const aClosed = isClosed(a.status);
-				const bClosed = isClosed(b.status);
-				if (aClosed !== bClosed) return aClosed ? 1 : -1;
-				const aAssigned = !aClosed && Boolean(a.assigned_to_session);
-				const bAssigned = !bClosed && Boolean(b.assigned_to_session);
-				if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
-				return 0;
-			});
+			// Keep each parent immediately before its descendants. Orphaned and legacy
+			// cyclic items remain visible as top-level items rather than disappearing.
+			const byParent = new Map<string, TodoSummary[]>();
+			const ids = new Set(todos.map((todo) => todoKey(todo.id)));
+			const roots: TodoSummary[] = [];
+			for (const todo of todos) {
+				const parent = todoKey(todo.parent_id);
+				if (!parent || !ids.has(parent) || parent === todoKey(todo.id)) roots.push(todo);
+				else byParent.set(parent, [...(byParent.get(parent) ?? []), todo]);
+			}
+			const result: TodoSummary[] = [];
+			const visit = (todo: TodoSummary, seen: Set<string>) => {
+				const id = todoKey(todo.id);
+				if (seen.has(id)) return;
+				seen.add(id);
+				result.push(todo);
+				for (const child of byParent.get(id) ?? []) visit(child, seen);
+			};
+			const seen = new Set<string>();
+			for (const root of roots) visit(root, seen);
+			for (const todo of todos) visit(todo, seen);
+			return result;
 		}
+		// Search is deliberately literal rather than fuzzy: each typed word only
+		// narrows the visible list, so results never jump around unexpectedly.
+		const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 		return todos.filter((todo) => {
-			const text = [
-				todo.id,
-				todo.title,
-				todo.status,
-				...(todo.tags ?? []),
-				todo.assigned_to_session,
-			]
+			const text = [todo.id, todo.title, todo.status, ...(todo.tags ?? []), todo.assigned_to_session]
 				.filter(Boolean)
-				.join(" ");
-			return fuzzyMatch(query, text);
+				.join(" ")
+				.toLowerCase();
+			return tokens.every((token) => text.includes(token));
 		});
 	}
 
 	function formatTodoLine(todo: TodoSummary, isSelected: boolean): string {
 		const closed = isClosed(todo.status);
 		const prefix = isSelected ? theme.fg("accent", "→ ") : "  ";
+		let depth = 0;
+		let parent = todoKey(todo.parent_id);
+		const seen = new Set<string>([todoKey(todo.id)]);
+		while (parent && !seen.has(parent) && depth < 8) {
+			seen.add(parent);
+			const ancestor = allTodos.find((candidate) => todoKey(candidate.id) === parent);
+			if (!ancestor) break;
+			depth += 1;
+			parent = todoKey(ancestor.parent_id);
+		}
+		const hierarchyPrefix = depth ? theme.fg("muted", `${"  ".repeat(depth)}↳ `) : "";
 		const id = theme.fg("accent", todo.id);
 		const title = theme.fg(closed ? "dim" : "text", todo.title?.trim() || "(untitled)");
 		const tagText = todo.tags?.length
@@ -180,7 +148,7 @@ export function createTodoSelector(
 
 		const status = theme.fg(closed ? "dim" : "success", `(${todo.status || "open"})`);
 
-		return prefix + id + " " + title + tagText + assignmentSuffix + " " + status;
+		return prefix + hierarchyPrefix + id + " " + title + tagText + assignmentSuffix + " " + status;
 	}
 
 	function render(width: number): string[] {
@@ -190,20 +158,18 @@ export function createTodoSelector(
 		// --- Header ---
 		const openCount = allTodos.filter((t) => !isClosed(t.status)).length;
 		const closedCount = allTodos.length - openCount;
-		lines.push(
-			theme.fg(
-				"accent",
-				theme.bold(`Todos (${openCount} open, ${closedCount} closed)`),
-			),
-		);
+		lines.push(truncateToWidth(
+			theme.fg("accent", theme.bold(`Todos (${openCount} open, ${closedCount} closed)`)),
+			maxWidth,
+			"",
+		));
 		lines.push("");
 
 		// --- Search input ---
 		const searchLabel = "Search: ";
-		const searchDisplay =
-			searchLabel +
-			(searchValue || theme.fg("dim", "type to filter..."));
-		lines.push(truncateToWidth(searchDisplay, maxWidth));
+		const cursor = _focused ? `${CURSOR_MARKER}${theme.fg("accent", "▏")}` : "";
+		const searchDisplay = searchLabel + (searchValue || theme.fg("dim", "type to filter...")) + cursor;
+		lines.push(truncateToWidth(searchDisplay, maxWidth, ""));
 		lines.push("");
 
 		// --- Todo list ---
@@ -211,7 +177,7 @@ export function createTodoSelector(
 		const maxVisible = Math.min(availableHeight, 12);
 
 		if (filteredTodos.length === 0) {
-			lines.push(theme.fg("dim", "  No matching todos"));
+			lines.push(truncateToWidth(theme.fg("dim", "  No matching todos"), maxWidth, ""));
 		} else {
 			const startIndex = Math.max(
 				0,
@@ -225,25 +191,26 @@ export function createTodoSelector(
 			for (let i = startIndex; i < endIndex; i++) {
 				const todo = filteredTodos[i];
 				if (!todo) continue;
-				lines.push(truncateToWidth(formatTodoLine(todo, i === selectedIndex), maxWidth));
+				lines.push(truncateToWidth(formatTodoLine(todo, i === selectedIndex), maxWidth, ""));
 			}
 
 			if (startIndex > 0 || endIndex < filteredTodos.length) {
-				lines.push(
+				lines.push(truncateToWidth(
 					theme.fg("dim", `  (${selectedIndex + 1}/${filteredTodos.length})`),
-				);
+					maxWidth,
+					"",
+				));
 			}
 		}
 
 		lines.push("");
 
 		// --- Footer hints ---
-		lines.push(
-			theme.fg(
-				"dim",
-				"Type to search • ↑↓ select • Enter pick/create • Esc back",
-			),
-		);
+		lines.push(truncateToWidth(
+			theme.fg("dim", "Type to search • ↑↓ select • Enter pick/create • Esc back"),
+			maxWidth,
+			"",
+		));
 
 		return lines;
 	}
@@ -255,6 +222,7 @@ export function createTodoSelector(
 					selectedIndex === 0
 						? filteredTodos.length - 1
 						: selectedIndex - 1;
+				tui.requestRender();
 			}
 			return;
 		}
@@ -264,6 +232,7 @@ export function createTodoSelector(
 					selectedIndex === filteredTodos.length - 1
 						? 0
 						: selectedIndex + 1;
+				tui.requestRender();
 			}
 			return;
 		}
@@ -285,19 +254,25 @@ export function createTodoSelector(
 			return;
 		}
 
-		// Treat printable characters as search input
-		if (keyData.length === 1 && keyData >= " ") {
-			searchValue += keyData;
-		} else if (keyData === "Backspace" || keyData === "\x7f") {
-			searchValue = searchValue.slice(0, -1);
-		} else if (keyData === "\x15") {
+		// Terminals commonly send Backspace as raw DEL (0x7f). Handle it before
+		// printable input; otherwise it gets inserted into the search string.
+		if (keyData === "Backspace" || keyData === "\x7f" || keyData === "\b") {
+			searchValue = Array.from(searchValue).slice(0, -1).join("");
+		} else if (keyData === "\x15") { 
 			// Ctrl+U — clear search
 			searchValue = "";
+		} else if (keyData.length === 1 && keyData.charCodeAt(0) >= 0x20) {
+			searchValue += keyData;
+		} else {
+			return;
 		}
-		// Ignore other control keys
-
+		/*
+		 * Keep filtering and redraw in one place, including after deletion.
+		 */
 		filteredTodos = filterAndSort(allTodos, searchValue);
 		selectedIndex = Math.min(selectedIndex, Math.max(0, filteredTodos.length - 1));
+		tui.requestRender();
+		return;
 	}
 
 	let _focused = false;
@@ -453,6 +428,7 @@ export function createTodoDetailOverlay(
 		}
 		if (keybindings.matches(keyData, "tui.select.up")) {
 			scrollOffset = Math.max(0, scrollOffset - 1);
+			tui.requestRender();
 			return;
 		}
 		if (keybindings.matches(keyData, "tui.select.down")) {
@@ -460,6 +436,7 @@ export function createTodoDetailOverlay(
 				Math.max(0, bodyLines.length - 1),
 				scrollOffset + 1,
 			);
+			tui.requestRender();
 			return;
 		}
 		if (
@@ -468,6 +445,7 @@ export function createTodoDetailOverlay(
 		) {
 			const contentHeight = getMaxHeight() - 3 - 2 - 2;
 			scrollOffset = Math.max(0, scrollOffset - Math.max(1, contentHeight));
+			tui.requestRender();
 			return;
 		}
 		if (
@@ -479,6 +457,7 @@ export function createTodoDetailOverlay(
 				Math.max(0, bodyLines.length - 1),
 				scrollOffset + Math.max(1, contentHeight),
 			);
+			tui.requestRender();
 			return;
 		}
 	}

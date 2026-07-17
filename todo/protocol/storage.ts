@@ -38,6 +38,8 @@ export interface TodoFrontMatter {
   status: string;
   created_at: string;
   assigned_to_session?: string;
+  /** Optional parent todo id. A missing value denotes a top-level todo. */
+  parent_id?: string;
 }
 
 export interface TodoRecord extends TodoFrontMatter {
@@ -137,13 +139,29 @@ export function splitTodosByAssignment(todos: TodoFrontMatter[]): {
   return { assignedTodos, openTodos, closedTodos };
 }
 
+/** UI input can occasionally include terminal control bytes (for example DEL).
+ * Never persist those in single-line metadata fields. */
+function cleanSingleLine(value: string): string {
+  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, "").trim();
+}
+
+function dropEmptyFields<T extends Record<string, unknown>>(obj: T): T {
+  const result = { ...obj };
+  for (const key of Object.keys(result)) {
+    if (result[key] === undefined) {
+      delete result[key];
+    }
+  }
+  return result;
+}
+
 export function serializeTodoListForOutput(todos: TodoFrontMatter[]): {
   assigned: TodoFrontMatter[];
   open: TodoFrontMatter[];
   closed: TodoFrontMatter[];
 } {
   const { assignedTodos, openTodos, closedTodos } = splitTodosByAssignment(todos);
-  const map = (t: TodoFrontMatter) => ({ ...t, id: formatTodoId(t.id) });
+  const map = (t: TodoFrontMatter) => dropEmptyFields({ ...t, id: formatTodoId(t.id) });
   return {
     assigned: assignedTodos.map(map),
     open: openTodos.map(map),
@@ -152,7 +170,7 @@ export function serializeTodoListForOutput(todos: TodoFrontMatter[]): {
 }
 
 export function serializeTodoForOutput(todo: TodoRecord): TodoRecord {
-  return { ...todo, id: formatTodoId(todo.id) };
+  return dropEmptyFields({ ...todo, id: formatTodoId(todo.id) });
 }
 
 // --- Paths ---
@@ -302,6 +320,7 @@ function parseFrontMatter(text: string, idFallback: string): TodoFrontMatter {
     status: "open",
     created_at: "",
     assigned_to_session: undefined,
+    parent_id: undefined,
   };
   const trimmed = text.trim();
   if (!trimmed) return data;
@@ -314,6 +333,10 @@ function parseFrontMatter(text: string, idFallback: string): TodoFrontMatter {
     if (typeof parsed.created_at === "string") data.created_at = parsed.created_at;
     if (typeof parsed.assigned_to_session === "string" && parsed.assigned_to_session.trim()) {
       data.assigned_to_session = parsed.assigned_to_session;
+    }
+    if (typeof parsed.parent_id === "string") {
+      const parentId = validateTodoId(parsed.parent_id);
+      if (!("error" in parentId)) data.parent_id = parentId.id;
     }
     if (Array.isArray(parsed.tags)) {
       data.tags = parsed.tags.filter((tag): tag is string => typeof tag === "string");
@@ -334,6 +357,7 @@ function parseTodoContent(content: string, idFallback: string): TodoRecord {
     status: parsed.status,
     created_at: parsed.created_at,
     assigned_to_session: parsed.assigned_to_session,
+    parent_id: parsed.parent_id,
     body: body ?? "",
   };
 }
@@ -347,6 +371,7 @@ function serializeTodo(todo: TodoRecord): string {
       status: todo.status,
       created_at: todo.created_at,
       assigned_to_session: todo.assigned_to_session || undefined,
+      parent_id: todo.parent_id || undefined,
     },
     null,
     2,
@@ -482,6 +507,7 @@ export async function listTodos(todosDir: string): Promise<TodoFrontMatter[]> {
         status: parsed.status,
         created_at: parsed.created_at,
         assigned_to_session: parsed.assigned_to_session,
+        parent_id: parsed.parent_id,
       });
     } catch {
       // ignore unreadable todo
@@ -507,20 +533,44 @@ export async function getTodo(
   }
 }
 
+async function validateParentId(todosDir: string, parentId: string | null | undefined, todoId?: string): Promise<string | undefined | { error: string }> {
+  if (parentId === undefined || parentId === null || parentId === "") return undefined;
+  const validated = validateTodoId(parentId);
+  if ("error" in validated) return { error: "Invalid parent_id. Expected TODO-<hex>." };
+  if (validated.id === todoId) return { error: "A todo cannot be its own parent" };
+
+  // Walking ancestors prevents cycles while accepting files created by older versions.
+  const seen = new Set<string>();
+  let currentId: string | undefined = validated.id;
+  while (currentId) {
+    if (currentId === todoId) return { error: "A todo cannot be made a descendant of itself" };
+    if (seen.has(currentId)) return { error: "Parent todo hierarchy contains a cycle" };
+    seen.add(currentId);
+    const parent = await getTodo(todosDir, currentId);
+    if ("error" in parent) return { error: `Parent todo ${displayTodoId(currentId)} not found` };
+    currentId = parent.parent_id;
+  }
+  return validated.id;
+}
+
 export async function createTodo(
   todosDir: string,
-  input: { title: string; tags?: string[]; status?: string; body?: string },
+  input: { title: string; tags?: string[]; status?: string; body?: string; parent_id?: string | null },
 ): Promise<TodoRecord | { error: string }> {
-  if (!input.title) return { error: "Title is required" };
+  const title = cleanSingleLine(input.title);
+  if (!title) return { error: "Title is required" };
   await ensureTodosDir(todosDir);
+  const parentId = await validateParentId(todosDir, input.parent_id);
+  if (typeof parentId === "object") return parentId;
   const id = await generateTodoId(todosDir);
   const filePath = getTodoPath(todosDir, id);
   const todo: TodoRecord = {
     id,
-    title: input.title,
-    tags: input.tags ?? [],
+    title,
+    tags: (input.tags ?? []).map(cleanSingleLine).filter(Boolean),
     status: input.status ?? "open",
     created_at: new Date().toISOString(),
+    parent_id: parentId,
     body: input.body ?? "",
   };
   // No lock needed for creation (new file)
@@ -535,7 +585,7 @@ export async function createTodo(
 export async function updateTodo(
   todosDir: string,
   id: string,
-  input: { title?: string; status?: string; tags?: string[]; body?: string },
+  input: { title?: string; status?: string; tags?: string[]; body?: string; parent_id?: string | null },
   sessionId?: string,
 ): Promise<TodoRecord | { error: string }> {
   const validated = validateTodoId(id);
@@ -548,9 +598,18 @@ export async function updateTodo(
       return { error: `Todo ${displayTodoId(id)} not found` } as const;
     }
     const existing = await readTodoFile(filePath, normalizedId);
-    if (input.title !== undefined) existing.title = input.title;
-    if (input.status !== undefined) existing.status = input.status;
-    if (input.tags !== undefined) existing.tags = input.tags;
+    if (input.title !== undefined) {
+      const title = cleanSingleLine(input.title);
+      if (!title) return { error: "Title is required" } as const;
+      existing.title = title;
+    }
+    if (input.status !== undefined) existing.status = cleanSingleLine(input.status) || "open";
+    if (input.tags !== undefined) existing.tags = input.tags.map(cleanSingleLine).filter(Boolean);
+    if (input.parent_id !== undefined) {
+      const parentId = await validateParentId(todosDir, input.parent_id, normalizedId);
+      if (typeof parentId === "object") return parentId;
+      existing.parent_id = parentId;
+    }
     if (input.body !== undefined) existing.body = input.body;
     if (!existing.created_at) existing.created_at = new Date().toISOString();
     clearAssignmentIfClosed(existing);
@@ -637,6 +696,10 @@ export async function deleteTodoById(
       return { error: `Todo ${displayTodoId(id)} not found` } as const;
     }
     const existing = await readTodoFile(filePath, normalizedId);
+    const children = (await listTodos(todosDir)).filter((todo) => todo.parent_id === normalizedId);
+    if (children.length) {
+      return { error: `Todo ${displayTodoId(id)} has ${children.length} sub-todo${children.length === 1 ? "" : "s"}. Reparent or delete them first.` } as const;
+    }
     await fs.unlink(filePath);
     return existing;
   });
