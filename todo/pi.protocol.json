@@ -3,7 +3,7 @@
   "nodeId": "pi_todo",
   "packageId": "pi-todo",
   "version": "0.1.0",
-  "purpose": "File-based todo management: create, list, get, update, delete, claim, and release todo items stored as markdown files under .pi/todos.",
+  "purpose": "File-based todo management: create, list, get, update, delete, and assign todo items stored as markdown files under .pi/todos.",
   "provides": [
     {
       "name": "list",
@@ -20,9 +20,51 @@
       "outputSchema": {
         "type": "object",
         "properties": {
-          "assigned": { "type": "array", "items": { "type": "object" } },
-          "open": { "type": "array", "items": { "type": "object" } },
-          "closed": { "type": "array", "items": { "type": "object" } },
+          "assigned": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
+                "title": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "status": { "type": "string" },
+                "created_at": { "type": "string" },
+                "assigned_to_session": { "type": "string" },
+                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
+              }
+            }
+          },
+          "open": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
+                "title": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "status": { "type": "string" },
+                "created_at": { "type": "string" },
+                "assigned_to_session": { "type": "string" },
+                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
+              }
+            }
+          },
+          "closed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
+                "title": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "status": { "type": "string" },
+                "created_at": { "type": "string" },
+                "assigned_to_session": { "type": "string" },
+                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
+              }
+            }
+          },
           "error": { "type": "string" }
         }
       },
@@ -41,13 +83,13 @@
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
           "title": { "type": "string" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -61,23 +103,23 @@
         "type": "object",
         "required": ["title"],
         "properties": {
-          "title": { "type": "string", "description": "Short summary of the todo" },
+          "title": { "type": "string", "description": "Short summary of the todo; whitespace-only titles are rejected" },
           "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tags" },
           "status": { "type": "string", "description": "Optional status (default: open)" },
           "body": { "type": "string", "description": "Long-form markdown details" },
-          "parent_id": { "type": ["string", "null"], "description": "Optional parent todo id; creates a sub-todo" }
+          "parent_id": { "description": "Optional parent todo id string; null also denotes a top-level todo" }
         }
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
           "title": { "type": "string" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -86,30 +128,30 @@
     },
     {
       "name": "update",
-      "description": "Update an existing todo's title, status, tags, or body. Use status=closed/open for close/reopen. Use body_mode=append to append body text instead of replacing it.",
+      "description": "Update an existing todo's title, status, tags, body, or parent. Use status=closed/open for close/reopen and body_mode=append to append body text.",
       "inputSchema": {
         "type": "object",
         "required": ["id"],
         "properties": {
           "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" },
-          "title": { "type": "string", "description": "New title" },
-          "status": { "type": "string", "description": "New status, e.g. open or closed" },
-          "tags": { "type": "array", "items": { "type": "string" }, "description": "New tags" },
+          "title": { "type": "string", "description": "New title; whitespace-only titles are rejected" },
+          "status": { "type": "string", "description": "New status, for example open or closed" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Replacement tags" },
           "body": { "type": "string", "description": "Body text to replace or append" },
           "body_mode": { "type": "string", "enum": ["replace", "append"], "description": "Body update mode. Defaults to replace." },
-          "parent_id": { "type": ["string", "null"], "description": "New parent todo id, or null to make this a top-level todo" }
+          "parent_id": { "description": "New parent todo id string, or null to make this a top-level todo" }
         }
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
           "title": { "type": "string" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -118,7 +160,7 @@
     },
     {
       "name": "delete",
-      "description": "Delete a todo by id. Returns the deleted todo record.",
+      "description": "Delete a todo by id. Todos with children cannot be deleted. Returns the deleted todo record.",
       "inputSchema": {
         "type": "object",
         "required": ["id"],
@@ -129,12 +171,13 @@
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
           "title": { "type": "string" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
+          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
@@ -142,56 +185,32 @@
       "execution": { "type": "handler", "handler": "delete" }
     },
     {
-      "name": "claim",
-      "description": "Claim assignment of a todo for the calling session. Returns the updated todo.",
+      "name": "assign",
+      "description": "Claim or release a todo assignment. Requires a stable caller identity via request.session.id (preferred) or request.callerNodeId; anonymous calls fail. Returns the updated todo.",
       "inputSchema": {
         "type": "object",
-        "required": ["id"],
+        "required": ["id", "action"],
         "properties": {
           "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" },
-          "force": { "type": "boolean", "description": "Override another session's assignment" }
+          "action": { "type": "string", "enum": ["claim", "release"], "description": "Claim for the calling identity, or release its claim" },
+          "force": { "type": "boolean", "description": "Override an assignment owned by another identity" }
         }
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
+          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
           "title": { "type": "string" },
           "tags": { "type": "array", "items": { "type": "string" } },
           "status": { "type": "string" },
           "created_at": { "type": "string" },
           "assigned_to_session": { "type": "string" },
+          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
           "body": { "type": "string" },
           "error": { "type": "string" }
         }
       },
-      "execution": { "type": "handler", "handler": "claim" }
-    },
-    {
-      "name": "release",
-      "description": "Release session assignment of a todo. Returns the updated todo.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["id"],
-        "properties": {
-          "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" },
-          "force": { "type": "boolean", "description": "Override another session's assignment" }
-        }
-      },
-      "outputSchema": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
-      },
-      "execution": { "type": "handler", "handler": "release" }
+      "execution": { "type": "handler", "handler": "assign" }
     }
   ]
 }

@@ -2,8 +2,8 @@
  * pi-todo — File-based todo management via pi-protocol.
  *
  * Registers the pi_todo node on the protocol fabric with handler-backed provides
- * for all todo operations (list, get, create, update, append, close, reopen, delete,
- * claim, release), and exposes a streamlined /todos slash command that uses the
+ * for all todo operations (list, get, create, update, delete, and assignment),
+ * and exposes a streamlined /todos slash command that uses the
  * protocol provides. No tool is registered — all operations go through the fabric.
  */
 
@@ -406,9 +406,8 @@ async function todoActionFlow(
       }
 
       if (action === "claim" || action === "release") {
-        const provide = action;
         const label = action === "claim" ? "Claimed" : "Released";
-        const updated = await invokeTodo<TodoRecord>(fabric, ctx, provide, { id: todo.id });
+        const updated = await invokeTodo<TodoRecord>(fabric, ctx, "assign", { id: todo.id, action });
         ctx.ui.notify(`${label} ${updated.id}`, "info");
         postResult(pi, `${label} ${formatTodoLine(updated)}`);
         continue;
@@ -599,13 +598,13 @@ function parseTodosCommand(args: string): ParsedCommand | null {
   if (["claim", "take", "start"].includes(command)) {
     const force = takeBooleanFlag(argv, "--force");
     const id = argv.shift();
-    return id ? { provide: "claim", input: { id, force } } : null;
+    return id ? { provide: "assign", input: { id, action: "claim", force } } : null;
   }
 
   if (["release", "drop", "unclaim"].includes(command)) {
     const force = takeBooleanFlag(argv, "--force");
     const id = argv.shift();
-    return id ? { provide: "release", input: { id, force } } : null;
+    return id ? { provide: "assign", input: { id, action: "release", force } } : null;
   }
 
   if (/^(?:TODO-)?[a-f0-9]{8}$/i.test(command)) {
@@ -798,7 +797,7 @@ function postHelp(pi: ExtensionAPI): void {
     "  `/todos list` or `/todos list all`",
     "  `/todos take TODO-deadbeef` / `/todos drop TODO-deadbeef`",
     "",
-    "Protocol access for agents is unchanged: use `pi_todo.list`, `pi_todo.get`, `pi_todo.create`, `pi_todo.update`, `pi_todo.delete`, `pi_todo.claim`, and `pi_todo.release`.",
+    "Protocol access for agents: use `pi_todo.list`, `pi_todo.get`, `pi_todo.create`, `pi_todo.update`, `pi_todo.delete`, and `pi_todo.assign`.",
   ].join("\n");
   pi.sendMessage({ customType: "pi-todo.help", content: help, display: true });
 }

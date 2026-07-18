@@ -1,6 +1,6 @@
 # pi-todo
 
-File-based todo management via pi-protocol: create, list, update, delete, claim, and release todo items stored as markdown files under `.pi/todos`. Close/reopen/append are handled through `update`.
+File-based todo management via pi-protocol: create, list, update, delete, and assign todo items stored as markdown files under `.pi/todos`. Close/reopen/append are handled through `update`; claim/release are handled through `assign`.
 
 ## Protocol provides
 
@@ -13,8 +13,7 @@ All operations are exposed through the `pi_todo` protocol node:
 | `pi_todo.create` | Create a new todo; pass `parent_id` to create a sub-todo |
 | `pi_todo.update` | Update an existing todo; use `parent_id` to move it (or `null` to make it top-level), `status` for close/reopen, and `body_mode: "append"` for append |
 | `pi_todo.delete` | Delete a todo |
-| `pi_todo.claim` | Claim session assignment |
-| `pi_todo.release` | Release session assignment |
+| `pi_todo.assign` | Claim or release session assignment with `action: "claim"` or `"release"` |
 
 ### Invoke examples
 
@@ -39,6 +38,21 @@ All operations are exposed through the `pi_todo` protocol node:
   "nodeId": "pi_todo",
   "provide": "update",
   "input": { "id": "TODO-deadbeef", "status": "closed" }
+}
+```
+
+Assignment requires a stable caller identity. Supply `request.session.id` (preferred)
+or `request.callerNodeId`, and use the same identity to release the assignment:
+
+```json
+{
+  "op": "call",
+  "request": {
+    "nodeId": "pi_todo",
+    "provide": "assign",
+    "input": { "id": "TODO-deadbeef", "action": "claim" },
+    "session": { "id": "my-session", "mode": "continue" }
+  }
 }
 ```
 

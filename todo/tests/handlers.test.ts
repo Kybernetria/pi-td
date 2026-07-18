@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHandlers } from "../protocol/handlers.ts";
 
-interface TodoOutput { id?: string; title?: string; error?: string }
+interface TodoOutput {
+  id?: string;
+  title?: string;
+  assigned_to_session?: string;
+  error?: string;
+}
 
 test("sub-todos support nesting, reparenting, and cycle protection", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-todo-subtask-"));
@@ -42,6 +47,27 @@ test("protocol handlers resolve storage from the active cwd provider", async () 
     }) as TodoOutput;
     assert.equal(created.title, "cwd-bound");
     assert.match(created.id ?? "", /^TODO-[a-f0-9]{8}$/);
+
+    assert.equal(handlers.claim, undefined);
+    assert.equal(handlers.release, undefined);
+    const anonymousClaim = await handlers.assign!({ id: created.id, action: "claim" }, {
+      nodeId: "pi_todo",
+      provide: "assign",
+    }) as TodoOutput;
+    assert.match(anonymousClaim.error ?? "", /request\.session\.id.*request\.callerNodeId/);
+
+    const claimed = await handlers.assign!({ id: created.id, action: "claim" }, {
+      nodeId: "pi_todo",
+      provide: "assign",
+      session: { id: "test-session", mode: "ephemeral" },
+    }) as TodoOutput;
+    assert.equal(claimed.assigned_to_session, "test-session");
+    const released = await handlers.assign!({ id: created.id, action: "release" }, {
+      nodeId: "pi_todo",
+      provide: "assign",
+      session: { id: "test-session", mode: "ephemeral" },
+    }) as TodoOutput;
+    assert.equal(released.assigned_to_session, undefined);
 
     const list = await handlers.list!({}, { nodeId: "pi_todo", provide: "list" }) as {
       open?: TodoOutput[];
