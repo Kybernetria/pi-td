@@ -8,7 +8,35 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { CURSOR_MARKER, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+
+const CURSOR_MARKER = "\x1b_pi:c\x07";
+const ANSI_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|_pi:[^\x07]*\x07)/g;
+
+function visibleWidth(text: string): number {
+	return Array.from(text.replace(ANSI_SEQUENCE, "")).length;
+}
+
+function truncateToWidth(text: string, maxWidth: number, ellipsis = "..."): string {
+	if (visibleWidth(text) <= maxWidth) return text;
+	const suffix = visibleWidth(ellipsis) <= maxWidth ? ellipsis : "";
+	const limit = Math.max(0, maxWidth - visibleWidth(suffix));
+	let width = 0;
+	let output = "";
+	for (let index = 0; index < text.length && width < limit;) {
+		ANSI_SEQUENCE.lastIndex = index;
+		const ansi = ANSI_SEQUENCE.exec(text);
+		if (ansi?.index === index) {
+			output += ansi[0];
+			index += ansi[0].length;
+			continue;
+		}
+		const point = String.fromCodePoint(text.codePointAt(index)!);
+		output += point;
+		width += 1;
+		index += point.length;
+	}
+	return `${output}${suffix}\x1b[0m`;
+}
 
 // These types come from the ctx.ui.custom() callback. We define minimal
 // structural interfaces instead of importing from pi-tui directly.

@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { spawn } from "node:child_process";
 import {
   ensureProtocolFabric,
   registerProtocolManifest,
@@ -15,18 +16,31 @@ import {
   type PiProtocolManifest,
 } from "@kybernetria/pi-protocol";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createHandlers } from "./protocol/handlers.ts";
 import { startupGC, getTodosDir, getTodoPath, normalizeTodoId } from "./protocol/storage.ts";
-import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import { createTodoSelector, createTodoDetailOverlay, type SelectorResult, type OverlayResult } from "./tui.ts";
 import path from "node:path";
 
 // Load manifest once at import time
 const manifest: PiProtocolManifest = JSON.parse(
-  readFileSync(new URL("./pi.protocol.json", import.meta.url), "utf8"),
+  readFileSync(fileURLToPath(new URL("./pi.protocol.json", import.meta.url)), "utf8"),
 );
 
 const NODE_ID = "pi_todo";
+
+function copyToClipboard(text: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const command = process.env.WAYLAND_DISPLAY ? "wl-copy" : "xclip";
+    const args = command === "xclip" ? ["-selection", "clipboard"] : [];
+    const child = spawn(command, args, { stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => code === 0 ? resolve() : reject(new Error(stderr.trim() || `${command} exited ${code}`)));
+    child.stdin.end(text);
+  });
+}
 const COMMAND_CALLER_ID = "pi.todos.command";
 
 interface ParsedCommand {
