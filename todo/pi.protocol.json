@@ -1,9 +1,14 @@
 {
-  "protocolVersion": "0.2.0",
-  "nodeId": "pi_todo",
-  "packageId": "pi-todo",
-  "version": "0.1.0",
-  "purpose": "File-based todo management: create, list, get, update, delete, and assign todo items stored as markdown files under .pi/todos.",
+  "$schema": "https://pi.dev/protocol/manifest-v1.schema.json",
+  "schemaVersion": 1,
+  "node": {
+    "id": "pi_todo",
+    "purpose": "File-based todo management: create, list, get, update, delete, and assign todo items stored as markdown files under .pi/todos.",
+    "tags": [
+      "todos",
+      "task-management"
+    ]
+  },
   "provides": [
     {
       "name": "list",
@@ -15,7 +20,8 @@
             "type": "boolean",
             "description": "If true, include closed todos in the response"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
@@ -25,14 +31,34 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-                "title": { "type": "string" },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "status": { "type": "string" },
-                "created_at": { "type": "string" },
-                "assigned_to_session": { "type": "string" },
-                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
-              }
+                "id": {
+                  "type": "string",
+                  "description": "Prefixed todo id (TODO-<hex>)"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "assigned_to_session": {
+                  "type": "string"
+                },
+                "parent_id": {
+                  "type": "string",
+                  "description": "Unprefixed parent todo id when nested"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "open": {
@@ -40,14 +66,34 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-                "title": { "type": "string" },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "status": { "type": "string" },
-                "created_at": { "type": "string" },
-                "assigned_to_session": { "type": "string" },
-                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
-              }
+                "id": {
+                  "type": "string",
+                  "description": "Prefixed todo id (TODO-<hex>)"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "assigned_to_session": {
+                  "type": "string"
+                },
+                "parent_id": {
+                  "type": "string",
+                  "description": "Unprefixed parent todo id when nested"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "closed": {
@@ -55,162 +101,440 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-                "title": { "type": "string" },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "status": { "type": "string" },
-                "created_at": { "type": "string" },
-                "assigned_to_session": { "type": "string" },
-                "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" }
-              }
+                "id": {
+                  "type": "string",
+                  "description": "Prefixed todo id (TODO-<hex>)"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "assigned_to_session": {
+                  "type": "string"
+                },
+                "parent_id": {
+                  "type": "string",
+                  "description": "Unprefixed parent todo id when nested"
+                }
+              },
+              "additionalProperties": false
             }
           },
-          "error": { "type": "string" }
-        }
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "list" }
+      "effects": [
+        "fs.read"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "safe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     },
     {
       "name": "get",
       "description": "Get a single todo by id (TODO-<hex> or raw hex). Returns the full todo record with body.",
       "inputSchema": {
         "type": "object",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Todo id (TODO-<hex> or raw hex)"
+          }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Prefixed todo id (TODO-<hex>)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "assigned_to_session": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Unprefixed parent todo id when nested"
+          },
+          "body": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "get" }
+      "effects": [
+        "fs.read"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "safe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     },
     {
       "name": "create",
       "description": "Create a new todo with title, optional tags, status, body, and optional parent_id for a sub-todo. Returns the created todo.",
       "inputSchema": {
         "type": "object",
-        "required": ["title"],
+        "required": [
+          "title"
+        ],
         "properties": {
-          "title": { "type": "string", "description": "Short summary of the todo; whitespace-only titles are rejected" },
-          "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tags" },
-          "status": { "type": "string", "description": "Optional status (default: open)" },
-          "body": { "type": "string", "description": "Long-form markdown details" },
-          "parent_id": { "description": "Optional parent todo id string; null also denotes a top-level todo" }
-        }
+          "title": {
+            "type": "string",
+            "description": "Short summary of the todo; whitespace-only titles are rejected"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional tags"
+          },
+          "status": {
+            "type": "string",
+            "description": "Optional status (default: open)"
+          },
+          "body": {
+            "type": "string",
+            "description": "Long-form markdown details"
+          },
+          "parent_id": {
+            "description": "Optional parent todo id string; null also denotes a top-level todo",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Prefixed todo id (TODO-<hex>)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "assigned_to_session": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Unprefixed parent todo id when nested"
+          },
+          "body": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "create" }
+      "effects": [
+        "fs.write"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "unsafe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     },
     {
       "name": "update",
       "description": "Update an existing todo's title, status, tags, body, or parent. Use status=closed/open for close/reopen and body_mode=append to append body text.",
       "inputSchema": {
         "type": "object",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" },
-          "title": { "type": "string", "description": "New title; whitespace-only titles are rejected" },
-          "status": { "type": "string", "description": "New status, for example open or closed" },
-          "tags": { "type": "array", "items": { "type": "string" }, "description": "Replacement tags" },
-          "body": { "type": "string", "description": "Body text to replace or append" },
-          "body_mode": { "type": "string", "enum": ["replace", "append"], "description": "Body update mode. Defaults to replace." },
-          "parent_id": { "description": "New parent todo id string, or null to make this a top-level todo" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Todo id (TODO-<hex> or raw hex)"
+          },
+          "title": {
+            "type": "string",
+            "description": "New title; whitespace-only titles are rejected"
+          },
+          "status": {
+            "type": "string",
+            "description": "New status, for example open or closed"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replacement tags"
+          },
+          "body": {
+            "type": "string",
+            "description": "Body text to replace or append"
+          },
+          "body_mode": {
+            "type": "string",
+            "enum": [
+              "replace",
+              "append"
+            ],
+            "description": "Body update mode. Defaults to replace."
+          },
+          "parent_id": {
+            "description": "New parent todo id string, or null to make this a top-level todo",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Prefixed todo id (TODO-<hex>)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "assigned_to_session": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Unprefixed parent todo id when nested"
+          },
+          "body": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "update" }
+      "effects": [
+        "fs.write"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "unsafe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     },
     {
       "name": "delete",
       "description": "Delete a todo by id. Todos with children cannot be deleted. Returns the deleted todo record.",
       "inputSchema": {
         "type": "object",
-        "required": ["id"],
+        "required": [
+          "id"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Todo id (TODO-<hex> or raw hex)"
+          }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Prefixed todo id (TODO-<hex>)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "assigned_to_session": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Unprefixed parent todo id when nested"
+          },
+          "body": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "delete" }
+      "effects": [
+        "fs.write"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "unsafe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     },
     {
       "name": "assign",
       "description": "Claim or release a todo assignment. Requires a stable caller identity via request.session.id (preferred) or request.callerNodeId; anonymous calls fail. Returns the updated todo.",
       "inputSchema": {
         "type": "object",
-        "required": ["id", "action"],
+        "required": [
+          "id",
+          "action"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "Todo id (TODO-<hex> or raw hex)" },
-          "action": { "type": "string", "enum": ["claim", "release"], "description": "Claim for the calling identity, or release its claim" },
-          "force": { "type": "boolean", "description": "Override an assignment owned by another identity" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Todo id (TODO-<hex> or raw hex)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "claim",
+              "release"
+            ],
+            "description": "Claim for the calling identity, or release its claim"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Override an assignment owned by another identity"
+          }
+        },
+        "additionalProperties": false
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "description": "Prefixed todo id (TODO-<hex>)" },
-          "title": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "status": { "type": "string" },
-          "created_at": { "type": "string" },
-          "assigned_to_session": { "type": "string" },
-          "parent_id": { "type": "string", "description": "Unprefixed parent todo id when nested" },
-          "body": { "type": "string" },
-          "error": { "type": "string" }
-        }
+          "id": {
+            "type": "string",
+            "description": "Prefixed todo id (TODO-<hex>)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "assigned_to_session": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Unprefixed parent todo id when nested"
+          },
+          "body": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
-      "execution": { "type": "handler", "handler": "assign" }
+      "effects": [
+        "fs.write"
+      ],
+      "traits": {
+        "determinism": "best_effort",
+        "replay": "unsafe",
+        "interaction": "request_response",
+        "cancellable": false
+      }
     }
   ]
 }

@@ -9,12 +9,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import {
-  ensureProtocolFabric,
-  registerProtocolManifest,
-  type ProtocolFabric,
-  type PiProtocolManifest,
-} from "@kybernetria/pi-protocol";
+import { ensureProtocolFabric, type ProtocolFabric } from "@kybernetria/pi-protocol/core";
+import { parseProtocolManifest } from "@kybernetria/pi-protocol/contract";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createHandlers } from "./protocol/handlers.ts";
@@ -22,12 +18,12 @@ import { startupGC, getTodosDir, getTodoPath, normalizeTodoId } from "./protocol
 import { createTodoSelector, createTodoDetailOverlay, type SelectorResult, type OverlayResult } from "./tui.ts";
 import path from "node:path";
 
-// Load manifest once at import time
-const manifest: PiProtocolManifest = JSON.parse(
+const definition = parseProtocolManifest(
   readFileSync(fileURLToPath(new URL("./pi.protocol.json", import.meta.url)), "utf8"),
+  { allowLegacyV02: false },
 );
 
-const NODE_ID = "pi_todo";
+const NODE_ID = definition.manifest.node.id;
 
 function copyToClipboard(text: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -41,7 +37,7 @@ function copyToClipboard(text: string): Promise<void> {
     child.stdin.end(text);
   });
 }
-const COMMAND_CALLER_ID = "pi.todos.command";
+const COMMAND_PRINCIPAL_PREFIX = "pi.todos.command";
 
 interface ParsedCommand {
   provide: string;
@@ -92,12 +88,14 @@ export default function todoExtension(pi: ExtensionAPI): void {
   const fabric = ensureProtocolFabric();
   let activeCwd = process.cwd();
 
-  // Safe re-registration
-  fabric.unregister(NODE_ID);
-  registerProtocolManifest(fabric, {
-    manifest,
+  const registration = fabric.install(definition, {
     handlers: createHandlers(() => activeCwd),
+  }, {
+    packageId: "pi-todo",
+    packageVersion: "0.1.0",
+    sourcePath: fileURLToPath(new URL(".", import.meta.url)),
   });
+  pi.on("session_shutdown", async () => { await registration.dispose(); });
 
   // Keep protocol storage aligned with Pi's active project context.
   pi.on("session_start", async (_event, ctx) => {
@@ -171,14 +169,10 @@ async function invokeTodo<T = unknown>(
   provide: string,
   input: Record<string, unknown>,
 ): Promise<T> {
-  const result = await fabric.invoke({
-    nodeId: NODE_ID,
-    provide,
-    input,
-    callerNodeId: COMMAND_CALLER_ID,
-    session: ctx.sessionManager?.getSessionId
-      ? { id: ctx.sessionManager.getSessionId(), mode: "ephemeral" }
-      : { mode: "ephemeral" },
+  const sessionId = ctx.sessionManager?.getSessionId?.() ?? "anonymous";
+  const principal = fabric.mintPrincipal(`${COMMAND_PRINCIPAL_PREFIX}:${sessionId}`, "user");
+  const result = await fabric.invokeAs(principal, `${NODE_ID}.${provide}`, input, {
+    grant: { targets: [`${NODE_ID}.${provide}`], maxDepth: 1, maxInvocations: 1 },
   });
 
   if (!result.ok) {

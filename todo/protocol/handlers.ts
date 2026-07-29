@@ -25,7 +25,7 @@ type TodosDirProvider = () => string;
 const defaultTodosDir = (): string => getTodosDir(process.cwd());
 
 function getSessionId(context?: ProtocolInvocationContext): string | undefined {
-  return context?.session?.id || context?.callerNodeId || undefined;
+  return context?.principal?.id ?? context?.session?.id;
 }
 
 function invalidParentId(parentId: unknown): boolean {
@@ -150,7 +150,7 @@ export const update_handler = makeUpdateHandler(defaultTodosDir);
 export const delete_handler = makeDeleteHandler(defaultTodosDir);
 export const assign_handler = makeAssignHandler(defaultTodosDir);
 
-/** Map of handler names to handler functions for registerProtocolManifest. */
+/** Exact provide-name bindings for canonical owned registration. */
 export function createHandlers(cwdProvider: () => string = () => process.cwd()): Record<string, ProtocolHandler> {
   const currentTodosDir = (): string => getTodosDir(cwdProvider());
   return {

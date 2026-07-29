@@ -3,14 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type {
-  InvokeRequest,
-  JsonSchemaLite,
-  PiProtocolManifest,
-  ProtocolFabric,
-} from "@kybernetria/pi-protocol";
-import { createProtocolFabric } from "../node_modules/@kybernetria/pi-protocol/fabric.ts";
-import { registerProtocolManifest } from "../node_modules/@kybernetria/pi-protocol/manifest.ts";
+import { createProtocolFabric, type InvokeRequest, type ProtocolFabric } from "@kybernetria/pi-protocol/core";
+import { parseProtocolManifest, type ProtocolDefinition } from "@kybernetria/pi-protocol/contract";
 import { createHandlers } from "../protocol/handlers.ts";
 
 interface TodoOutput {
@@ -32,8 +26,8 @@ interface TodoListOutput {
   error?: string;
 }
 
-async function loadManifest(): Promise<PiProtocolManifest> {
-  return JSON.parse(await readFile(new URL("../pi.protocol.json", import.meta.url), "utf8")) as PiProtocolManifest;
+async function loadDefinition(): Promise<ProtocolDefinition> {
+  return parseProtocolManifest(await readFile(new URL("../pi.protocol.json", import.meta.url), "utf8"), { allowLegacyV02: false });
 }
 
 async function invoke<T>(fabric: ProtocolFabric, request: Omit<InvokeRequest, "nodeId">): Promise<T> {
@@ -42,39 +36,21 @@ async function invoke<T>(fabric: ProtocolFabric, request: Omit<InvokeRequest, "n
   return result.output as T;
 }
 
-function assertSupportedSchema(schema: JsonSchemaLite, location: string): void {
-  if (schema.type !== undefined) {
-    assert.ok(
-      ["string", "number", "integer", "boolean", "object", "array", "null"].includes(schema.type),
-      `${location}.type must be a supported JsonSchemaLite type`,
-    );
-  }
-  for (const [name, property] of Object.entries(schema.properties ?? {})) {
-    assertSupportedSchema(property, `${location}.properties.${name}`);
-  }
-  if (schema.items) assertSupportedSchema(schema.items, `${location}.items`);
-}
-
 test("manifest registers all audited provides with supported schemas and matching handlers", async () => {
-  const manifest = await loadManifest();
-  assert.deepEqual(manifest.provides.map((provide) => provide.name), ["list", "get", "create", "update", "delete", "assign"]);
-  for (const provide of manifest.provides) {
-    assert.equal(provide.execution.type, "handler");
-    assertSupportedSchema(provide.inputSchema, `${provide.name}.inputSchema`);
-    assertSupportedSchema(provide.outputSchema, `${provide.name}.outputSchema`);
-  }
-
+  const definition = await loadDefinition();
+  assert.deepEqual(definition.manifest.provides.map((provide) => provide.name), ["list", "get", "create", "update", "delete", "assign"]);
+  assert.equal(definition.sourceSchemaVersion, 1);
   const fabric = createProtocolFabric();
-  registerProtocolManifest(fabric, { manifest, handlers: createHandlers() });
+  fabric.install(definition, { handlers: createHandlers() });
   assert.equal(fabric.registry().provides.length, 6);
 });
 
 test("manifest-backed invocations cover list/get/create/update/delete/assign and validation", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "pi-todo-protocol-"));
   try {
-    const manifest = await loadManifest();
+    const definition = await loadDefinition();
     const fabric = createProtocolFabric();
-    registerProtocolManifest(fabric, { manifest, handlers: createHandlers(() => root) });
+    fabric.install(definition, { handlers: createHandlers(() => root) });
 
     const parent = await invoke<TodoOutput>(fabric, {
       provide: "create",
@@ -103,9 +79,8 @@ test("manifest-backed invocations cover list/get/create/update/delete/assign and
     const claimed = await invoke<TodoOutput>(fabric, {
       provide: "assign",
       input: { id: child.id, action: "claim" },
-      callerNodeId: "audit-caller",
     });
-    assert.equal(claimed.assigned_to_session, "audit-caller");
+    assert.equal(claimed.assigned_to_session, "system:local");
 
     const listed = await invoke<TodoListOutput>(fabric, { provide: "list", input: {} });
     assert.equal(listed.assigned?.[0]?.id, child.id);
@@ -115,7 +90,6 @@ test("manifest-backed invocations cover list/get/create/update/delete/assign and
     const released = await invoke<TodoOutput>(fabric, {
       provide: "assign",
       input: { id: child.id, action: "release" },
-      callerNodeId: "audit-caller",
     });
     assert.equal(released.assigned_to_session, undefined);
 
@@ -131,14 +105,16 @@ test("manifest-backed invocations cover list/get/create/update/delete/assign and
     });
     assert.deepEqual(invalidSchemaInput, {
       ok: false,
-      error: { code: "INVALID_INPUT", message: "input.tags must be array" },
+      error: { code: "INPUT_INVALID", message: "Input does not satisfy the protocol contract" },
     });
 
-    const invalidParent = await invoke<TodoOutput>(fabric, {
+    const invalidParent = await fabric.invoke({
+      nodeId: "pi_todo",
       provide: "create",
       input: { title: "Bad parent", parent_id: 42 },
     });
-    assert.match(invalidParent.error ?? "", /parent_id must be a todo id string or null/);
+    assert.equal(invalidParent.ok, false);
+    if (!invalidParent.ok) assert.equal(invalidParent.error.code, "INPUT_INVALID");
 
     const invalidAction = await fabric.invoke({
       nodeId: "pi_todo",
@@ -146,7 +122,7 @@ test("manifest-backed invocations cover list/get/create/update/delete/assign and
       input: { id: "TODO-deadbeef", action: "take" },
     });
     assert.equal(invalidAction.ok, false);
-    if (!invalidAction.ok) assert.equal(invalidAction.error.code, "INVALID_INPUT");
+    if (!invalidAction.ok) assert.equal(invalidAction.error.code, "INPUT_INVALID");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
