@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.80.6",
-    "@kybernetria/pi-protocol": "https://github.com/Kybernetria/pi-protocol/releases/download/v3.0.2/kybernetria-pi-protocol-3.0.2.tgz",
+    "@kybernetria/pi-protocol": "https://github.com/Kybernetria/pi-protocol/releases/download/v3.0.3/kybernetria-pi-protocol-3.0.3.tgz",
     "typebox": "^1.3.6"
   },
   "peerDependencies": {
